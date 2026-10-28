@@ -9,6 +9,7 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+*.pdf
 
 # System files
 *.DS_Store

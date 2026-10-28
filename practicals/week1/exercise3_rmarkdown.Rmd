@@ -1,0 +1,33 @@
+---
+title: "Chemical Composition of Pottery"
+author: "Ruben Uijtdewilligen"
+output: pdf_document
+date: "28-10-2026"
+---
+
+## Introduction
+
+This report shows the chemical composition of pottery from different sites. The dataset consists of measurements of various elements, such as Al, Fe, Mg, Ca and Na.
+
+First, we load in the required libraries and the dataset. Then we melt the data into a long format.
+
+```{r loading-data, message=FALSE}
+library(car)
+library(reshape2)
+
+data(Pottery)
+MeltedPottery <- melt(Pottery)
+```
+
+## Visualization
+
+In this figure, we see the distribution of the different elements per location.
+
+```{r visualization}
+library(ggplot2)
+
+ggplot(data=MeltedPottery, aes(x=variable, y=value, col=variable)) + 
+  geom_boxplot() + 
+  facet_grid(. ~ Site) +
+  labs(x="Element", y="Concentration", col="Element")
+```
