@@ -1,0 +1,200 @@
+---
+title: "Predicting population size, persons per household and fraction of votes for counties during the 2016 Primary Election"
+subtitle: "Project week 2"
+author: "Guus Medema 1584189, Ruben Uijtdewilligen 1520660"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(car)
+library(glmnet)
+```
+
+# Introduction
+
+We analysed 2465 records of US-counties from the Census Bureau, combined with the results of the 2016 primary elections. We make a multiple linear regression model and a lasso model.
+
+```{r}
+# read the datafile
+theData <- read.table(file = '/Users/ruben/dev/bif21306-dav/data/raw/county_facts_and_primary_results.txt', header = TRUE)
+dim(theData)
+```
+
+This loads the data and shows its dimensions, there are 2465 counties and 66 variables. The last 14 columns are the voting results, the first column is the name of the county the other columns are socio-economic variables.
+
+# Question 1
+
+We choose multiple linear regression because we want to model a continuous response (POP2014 and PERS) as a linear combination of the other variables from the given set. Ordinary least squares is the standard method for this. We check the variance inflation factors (VIF) to make sure there is no multicollinearity and we generate histograms and Q-Q plots of the residuals to check the normality assumption.
+
+```{r}
+# This makes two multiple linear regression models,
+# model1 for predicting the population and model2 for predicting persons per household
+model1 <- lm(POP2014 ~ PERS + MEDINC + HO + AREA, theData)
+model2 <- lm(PERS ~ POP2014 + MEDINC + HO + AREA, theData)
+
+summary(model1)
+summary(model2)
+```
+
+The summaries show that all independent variables are significant in both models (p < 0.001), so all predictors contribute to the prediction. The R-squared is about 0.19 for model 1 and only 0.07 for model 2, meaning the models explain only a small part of the variation in the response.
+
+```{r}
+vif(model1)
+vif(model2)
+```
+
+The VIF, variance inflation factor, shows values of around 1, meaning that multicollinearity is not present. So there is no pair of independent variables that are strongly correlated.
+
+```{r}
+hist(model1$residuals, main="Histogram of residuals of model 1 (POP2014)")
+hist(model2$residuals, main="Histogram of residuals of model 2 (PERS)", breaks = 20)
+qqnorm(model1$residuals, main="Residuals for Model 1 (POP2014) Normal Q-Q Plot")
+qqnorm(model2$residuals, main="Residual for Model 2 (PERS) Normal Q-Q Plot")
+```
+
+The histogram of the residuals of model 1 is right-skewed: most residuals are small, but a few counties are predicted too low, producing outliers. This violates the normality assumption. This is confirmed by the Q-Q plot because the points follow the line in the middle but deviate in the upper tail.
+
+The residuals of model 2 are approximately symmetric around zero and follow the Q-Q line reasonably well, so for model 2 the normality assumption is satisfied.
+
+```{r}
+ypred1 <- predict(model1)
+plot(theData$POP2014, ypred1, "p", main="Model 1: observed vs predicted",
+     xlab="Observed value", ylab="Predicted value")
+abline(a=0, b=1, col="red")
+
+ypred2 <- predict(model2)
+plot(theData$PERS, ypred2, "p", main="Model 2: observed vs predicted",
+     xlab="Observed value", ylab="Predicted value")
+abline(a=0, b=1, col="red")
+```
+
+These plots show a validation step for the models by comparing model prediction to the measured value. If all the points lay on the red line (y=x) the model is perfect. Both models show clear deviations from the red line, especially model 1, which underpredicts the largest counties.
+
+# Question 2
+
+We use the lasso (glmnet, alpha = 1) to predict the fraction of votes for Hillary Clinton and Donald Trump from all 51 socio-economic descriptors. We choose the lasso because many descriptors are strongly correlated, and the lasso shrinks coefficients to exactly zero, which automatically selects the relevant predictors.
+
+## Model of fraction of votes for Hillary Clinton
+
+```{r}
+# load data as correct type, matrix
+fracvotesh <- theData$Democrat_Hillary_Clinton_fracvotes # response
+socio_eco <- theData[, c(2:52)] # all socio-economic independent variables
+x <- as.matrix(socio_eco)
+
+# cross-validation plot: MSE against log(lambda)
+set.seed(123)
+cv_h <- cv.glmnet(x = x, y = fracvotesh, alpha = 1)
+plot(cv_h)
+```
+
+This plot shows the cross-validated mean squared error (MSE) for each value of log(lambda). The minimum of this plot leads to the optimal tuning parameter, which balances the fit of the model against the strength of the penalty on the coefficients. The numbers at the top show how many predictors the lasso keeps in the model: for small penalties almost all 51 descriptors are active, for large penalties almost none.
+
+```{r}
+# lambda values of the Clinton model
+cv_h$lambda.min # smallest cross-validated error
+cv_h$lambda.1se # simplest model within 1 SE of that error
+```
+
+lambda.min is the smallest and lambda.1se is the largest of the two. This happens because a larger lambda means a stronger L1 penalty, so more coefficients are put exactly to 0.
+
+```{r}
+# cross validation scatterplot
+set.seed(123)
+splits <- split(sample(1:length(fracvotesh)), 1:10) # 10 random groups
+ypredh <- rep(NA, length(fracvotesh)) # vector for the predicted values
+
+# leave out one group and make a model
+for (i in splits) {
+  mdl <- cv.glmnet(x = x[-i, ], y = fracvotesh[-i], alpha = 1)
+  # predict the left-out group with the model that never saw it
+  ypredh[i] <- predict(mdl, newx = x[i, , drop = FALSE], s = "lambda.min")
+}
+
+Q2_h <- 1 - sum((fracvotesh - ypredh)^2) / sum((fracvotesh - mean(fracvotesh))^2)
+plot(fracvotesh, ypredh, main = sprintf("Clinton lasso Q^2 = %.2f", Q2_h),
+     xlab = "Observed", ylab = "Predicted (out-of-fold)")
+abline(a = 0, b = 1, col = "red")
+```
+
+This is the validation of the predictive properties. Every point is a county predicted by a model that never saw that county during training. The Q^2 is computed from these prediction. Aa value of 1 means perfect predictions. The points follow the red line reasonably well and the Q^2 ends up around 0.5-0.6, so the lasso model predicts the Clinton vote fraction reasonably well.
+
+```{r}
+# coefficients of independent variables that are not 0
+indx <- which(coef(cv_h, s = "lambda.min") != 0)
+rownames(coef(cv_h, s = "lambda.min"))[indx] # the variables that are in the model
+sort(coef(cv_h, s = "lambda.min")[indx, 1]) # sorted by effect size
+```
+
+These are the explanatory variables that are kept for Hillary Clinton, sorted by their coefficient.
+
+## Model of fraction of votes for Donald Trump
+
+```{r}
+# load data as correct type, matrix
+fracvotesd <- theData$Republican_Donald_Trump_fracvotes # response
+# all socio-economic independent variables are already loaded in the previous part
+
+# cross-validation plot: MSE against log(lambda)
+set.seed(123)
+cv_d <- cv.glmnet(x = x, y = fracvotesd, alpha = 1)
+plot(cv_d)
+```
+
+This is the same cross-validation plot, now for the Trump model. The model needs almost all 50 variables.
+
+```{r}
+# lambda values of the Trump model
+cv_d$lambda.min # smallest cross-validated error
+cv_d$lambda.1se # simplest model within 1 SE of that error
+```
+
+```{r}
+# cross validation scatterplot with out-of-fold predictions and the Q^2
+set.seed(123)
+splits <- split(sample(1:length(fracvotesd)), 1:10) # 10 random groups
+ypredd <- rep(NA, length(fracvotesd)) # vector for the predicted values
+
+# leave out one group and make a model
+for (i in splits) {
+  mdl <- cv.glmnet(x = x[-i, ], y = fracvotesd[-i], alpha = 1)
+  # predict the left-out group with the model that never saw it
+  ypredd[i] <- predict(mdl, newx = x[i, , drop = FALSE], s = "lambda.min")
+}
+
+Q2_d <- 1 - sum((fracvotesd - ypredd)^2) / sum((fracvotesd - mean(fracvotesd))^2)
+plot(fracvotesd, ypredd, main = sprintf("Trump lasso Q^2 = %.2f", Q2_d),
+     xlab = "Observed", ylab = "Predicted (out-of-fold)")
+abline(a = 0, b = 1, col = "red")
+```
+
+The points deviate much more from the red line than in the Clinton model, and the Q^2 ends up around 0.3. The model is worse than the Clinton model.
+
+```{r}
+# coefficients of independent variables that are not 0
+indxd <- which(coef(cv_d, s = "lambda.min") != 0)
+rownames(coef(cv_d, s = "lambda.min"))[indxd] # the variables that are in the model
+sort(coef(cv_d, s = "lambda.min")[indxd, 1]) # sorted by effect size
+```
+
+These are the variables that the lasso keeps for Donald Trump, again sorted by their coefficient.
+
+## Discussion
+
+The multiple linear regression models from question 1 are not strong: the POP2014 model has an R-squared of 0.19 and the PERS model an R-squared of 0.07.
+
+The lasso models are also not that strong, because they have a low Q^2 value: about 0.3 for Trump and 0.5-0.6 for Clinton.
+
+## Conclusion
+
+The most relevant variables for predicting the fraction of votes Trump or Clinton receives differ between both candidates.
+
+For Donald Trump, the most relevant predictors are the number of persons per household in a county, the perentage of native Hawaiian- and Other Pacific Islander-owned firms in a county and the percentage of persons under 18 years in a county.
+
+For Hillary Clinton, the most relevant predictors are the percentage of people with two or more races in a county, the percentage of persons aged above 25 that are a high school graduate or higher and the percentage of persons under 5 years in a county.
+
+
+
+
