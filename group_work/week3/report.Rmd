@@ -1,0 +1,188 @@
+---
+title: "Visualization and normalization for socio-economic variables and votes in counties during the 2016 Primary Election"
+subtitle: "Project week 3"
+author: "Guus Medema (1584189) and Ruben Uijtdewilligen (1520660)"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(pheatmap)
+library(ggplot2)
+library(gridExtra)
+```
+
+# Introduction
+
+We analysed 2465 records of US-counties from the Census Bureau, combined with the results of the 2016 primary elections.
+
+```{r}
+# read the datafile
+data <- read.table(
+  file = '/Users/ruben/dev/bif21306-dav/data/raw/county_facts_and_primary_results.txt',
+  header = TRUE
+)
+
+dim(data)
+```
+
+This loads the data and shows its dimensions, there are 2465 counties and 66 variables. The last 14 columns are the voting results, the first column is the name of the county the other columns are socio-economic variables.
+
+# Question 1
+
+## Sub question a
+
+We generate a heatmap of the data using the function **pheatmap()**.
+
+```{r}
+pheatmap(as.matrix(data[,-1]), main = "Heatmap of Data")
+```
+
+We see that most values are relatively close to zero This is because they are percentages. A few variables have values reaching to 200,000,000. These variables show absolute values. For example, SALES and SHIPM are large amounts of money.
+
+The values for the heatmap can be scaled in order to get a hetmap that is easier to read.
+
+```{r}
+pheatmap(as.matrix(data[,-1]), scale = "row", main="Heatmap of Row-Scaled Data")
+```
+
+## Sub question b
+
+We use **pheatmap** to generate a heatmap of the correlation matrix of the data.
+
+```{r}
+correlation_matrix = cor(data[,-1])
+pheatmap(correlation_matrix, main = "Heatmap of Correlation Matrix")
+```
+
+The red block in the top left of the heatmap shows that there is a high positive correlation between the amount of people in the population and some other variables. For example, the amount of building permits also correlates positively with the population size. Also, if the population in a county was relatively high in 2010, it was still relatively high in 2014.
+
+Percentages that are opposites, for example the percentage of white people and the percentage of black people in a county, are strongly negatively correlated.
+
+Another strong negative correlation occurs between income and the percentage of people that live below the poverty level.
+
+## Sub question c
+
+We loop through every column to find the amount of times -1 appears in the data.
+
+```{r echo = T, results = 'hide'}
+for (column in colnames(data)) {
+  print(column)
+  print(sum(data[[column]] == -1))
+}
+```
+
+We see that for 35 counties, the population percentage change between April 1, 2010 and July 1, 2014 was not measured. For 22 counties, the percentage change of private nonfarm employment in 2012-2013 was not measured.
+
+For the republicans Marco Rubio and Ben Carson, the data on their amount of votes is missing in respectively 823 and 1620 counties. This happened because they abandonded the race.
+
+# Question 2
+
+We use **prcomp()** to apply PCA. We then use **plot()** to generate a histogram of the variances per principal component.
+
+```{r}
+# Apply PCA
+p <- prcomp(data[,-1])
+
+# Generate a histogram of the variances per principal component
+plot(p, 
+     main = "PCA Variance", 
+     xlab = "Principal Components")
+```
+
+We use **summary()** to see the exact values for the proportions of variances.
+
+```{r}
+summary(p)
+```
+
+Without scaling or normalizing the data, 95% of variance is explained after two variables. We can use generate a biplot to see what variables these are.
+
+```{r, warning = FALSE}
+biplot(p, cex=c(0.5,0.5), main = "PCA Biplot")
+```
+
+The two variables that explain 95% of variance are SHIPM (Manufacturer’s shipments, 2007 (\$1,000)) and SALES1 (Merchant wholesaler sales, 2007 (\$1,000)). 
+
+# Question 3
+
+We generate 5 scatterplots using **ggplot2**. We store them in the variables *p1* to *p5* and use **gridExtra** to arrange them in a grid.
+
+```{r}
+p1 <- ggplot(data, aes(x=POP2014, y=HOFIRMS)) + geom_point() +
+  xlab("Estimated population 2014") +
+  ylab("Hawaiian-owned firms (%)")
+p2 <- ggplot(data, aes(x=POP2014, y=NOFIRMS)) + geom_point() +
+  xlab("Estimated population 2014") +
+  ylab("Alaska-owned firms (%)")
+p3 <- ggplot(data, aes(x=POP2014, y=SALES2)) + geom_point() +
+  xlab("Estimated population 2014") +
+  ylab("Retail sales ($1,000)")
+p4 <- ggplot(data, aes(x=POP2014, y=BOFIRMS)) + geom_point() +
+  xlab("Estimated population 2014") +
+  ylab("Black-owned firms (%)")
+p5 <- ggplot(data, aes(x=POP2014, y=SHIPM)) + geom_point() +
+  xlab("Estimated population 2014") +
+  ylab("Manufacturer shipments ($1,000)")
+grid.arrange(p1, p2, p3, p4, p5, nrow = 2)
+```
+
+All plots have the estimated population in 2014 on the x-axis. We could have also used the population in 2010, which gives similar results. Large counties have stayed large, and counties with a smaller population in 2010, still had a smaller population in 2014.
+
+The plot for correlation with the percentage of native Hawaiian- and other Pacific Islander-owned firms in 2007, show a horizontal line around zero and a few outliers in the top left. This happens because the counties on Hawaii have small population sizes and Hawaiian- and other Pacific Islander-owned firms are mainly on Hawaii.
+
+Something similar occurs for the percentage of American Indian- and Alaska Native-owned firms in 2007, for which the correlation scatterplot shows an L-shape.
+
+The estimated population in 2014 and the retail sales in 2007 correlate strongly. Counties with large populations, have more retail sales.
+
+The percentage of Black-owned firms and the population do not show correlation. This is logical, because the percentage of Black-owned firms is influenced by the percentage of Black or African American people in a county (column 11, variable BLACK).
+
+Manufacturer shipments and population show some correlation. There correlation is not very strong, because small counties can still export large amounts of products.
+
+# Question 4
+
+## Sub question a
+
+```{r}
+boxplot(data[,-1], main = "Boxplot of Original Data")
+```
+
+A boxplot of the data shows that the large amounts of money for variables are much higher absolute numbers than the percentage variables.
+
+```{r}
+centered_data <- scale(data[,-1], center = TRUE, scale = FALSE)
+boxplot(centered_data, main = "Boxplot of Mean-Centered Data")
+```
+
+Only centering the means, does not change this. Therefore, we also scale the data.
+
+```{r}
+
+transformed_data <- scale(data[,-1], center = TRUE, scale = TRUE)
+boxplot(transformed_data, main = "Boxplot of Transformed Data")
+
+pheatmap(transformed_data, 
+         show_rownames = FALSE, 
+         show_colnames = TRUE, 
+         scale = "none", 
+         main = "Heatmap of Transformed Data")
+```
+
+This generates a much more relevant boxplot. Comparing the heatmap of the transformed data to the heatmap of the original data in question 1, we see that this data is much more flattened out.
+
+## Sub question b
+
+```{r}
+pca_scaled <- prcomp(transformed_data)
+
+summary(pca_scaled)
+plot(pca_scaled, main = "PCA Variance (Scaled)")
+biplot(pca_scaled, cex = c(0.5, 0.5), main = "PCA Biplot (Scaled)")
+```
+
+The summary of the applied PCA to the transformed data shows that now the first 21 variables are important to explain 90% of the variances, compared to 1-2 variables before transforming the data. This is also visible in the biplot, which doesn't show vectors that are much larger than other vectors anymore, which was visible in question 2.
+
+# Conclusion
+
+When working with a dataset, you should always first visualize the data. In this case, we saw that without normalizing, the data was not very useful because some variables were percentages and had values between 0 and 1, and some variables were absolute and had values of $200,000,000. After normalizing by centering the means and scaling the data, it is easier to work with the data.
