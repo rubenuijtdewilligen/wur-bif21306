@@ -1,0 +1,246 @@
+---
+title: "Analysing the patterns in music covers for different genres"
+author:
+  - Guus Medema (1584189)
+  - Ruben Uijtdewilligen (1520660)
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: false
+    number_sections: false
+    highlight: arrow
+bibliography: references.bib
+reference-section-title: References
+fontsize: 11pt
+geometry:
+  - top=0.9in
+  - bottom=1in
+  - left=0.9in
+  - right=0.9in
+header-includes:
+  - \usepackage{amsmath,amssymb,booktabs,graphicx,hyperref,setspace,mdframed,fancyvrb,float}
+  - \usepackage[labelfont=bf,labelsep=colon]{caption}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_knit$set(root.dir = '~/dev/bif21306-dav')
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.align = "center",
+  fig.pos = "H",
+  fig.width = 6,
+  fig.height = 4,
+  fancyvrb = list(
+    numbers = 'left',   # line numbers
+    numbersep = 5,      # space between number and code
+    xleftmargin = 3*12  # 3em indentation (approx 12pt per em)
+  )
+)
+```
+
+```{r install, include=FALSE, message=FALSE, warning=FALSE}
+# Install required packages
+packages <- c("ggplot2", "ggsci", "ggiraph", "Rtsne", "uwot")
+installed <- packages %in% rownames(installed.packages())
+if (any(!installed)) {
+  install.packages(packages[!installed])
+}
+
+# Load the required libraries
+library(ggplot2)
+library(ggsci)
+library(ggiraph)
+library(Rtsne)
+library(uwot)
+```
+
+# Introduction
+
+In this project, 2000 album covers from different genres are analysed. The covers are from 20 different genres, where we try to see if we can assign different groups based on colour and standard deviation of the cover. And if the different groups that are made are close to the real genre. For this PCA, t-SNE, and UMAP are used. 
+
+The data, the covers, are in a data frame where every row is an album cover and every column represent some data obout that cover. The first column, image_uri, is the original name of the image file and is the unique identifier. The second column, image_base64, contains the image data. A URL to the album cover. The third columns, label, is the genre of which the album is from, containing a number from 0 to 19 what corresponds to an genre. The 4th to 515th column, dim_0 to dim_511, represents the image embedding using numbers, the features. 
+
+A data point, row, is a data point with 512 dimensions (the features). These numbers are generated using CLIP, a large pre-trained vision transformer similar to a large language model. This is quite hard to group if done by a human, saying what is a close neighbour in 511 dimension is even harder. And to visualise a plot in 511 dimension might as well be impossible to grasp. However, for this we have PCA, t-SNE, and UMAP to visualise these groups and have a better way to show what image closely relate to each other.
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines'}
+df <- read.csv("data/raw/album_covers.csv.xz")
+
+genres <- c("Blues", "Classical", "Country", "DeathMetal", "DoomMetal",
+            "DrumNBass", "Electronic", "Folk", "Grime", "HeavyMetal", "HipHop",
+            "Jazz", "LoFi", "Pop", "PsychedelicRock", "Punk", "Reggae", "Rock",
+            "Soul", "Techno")
+
+df$genre <- genres[df$label + 1]
+
+df$tooltip <- paste0(
+  "<img src='", df$image_base64,
+  "' width='150', height='150' />"
+)
+```
+
+To speed the process of editing, plotting, visualising we use a sample of 2000 rows and not the all 20000 album covers. This significantly speeds up the process and we saw the same result in the PCA and biplot for both the sample and all 20000 points.
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines'}
+df_sample <- df[sample(nrow(df), 2000), ]
+```
+
+# Methods
+
+## Principal Component Analysis
+
+We perform a principal component analysis:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines'}
+p <- prcomp(df[, 4:(ncol(df)-2)])
+```
+
+Which results in this variance plot:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines', fig.cap = "Variance plot for PCA"}
+plot(p,
+     main = "PCA Variance",
+     xlab = "Principal Components")
+```
+
+And this biplot of PC1 vs PC2:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines', fig.cap = "Biplot of PC1 vs PC2"}
+biplot(p, scale=TRUE, main = "Biplot of PC1 vs PC2")
+```
+
+## t-SNE
+
+We perform a t-SNE analysis:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines'}
+tsne_emb = Rtsne(
+  df_sample[, 4:(ncol(df_sample)-2)],
+  dims = 2,
+  perplexity = 50,
+  pca = TRUE,
+  max_iter = 500,
+  check_duplicates = FALSE
+)
+```
+
+And we plot it in a scatter plot with different colours per genre:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines', fig.cap="t-SNE plot"}
+df_tsne <- data.frame(
+  x = tsne_emb$Y[, 1],
+  y = tsne_emb$Y[, 2],
+  
+  genre = df_sample$genre
+)
+
+ggplot(df_tsne, aes(x = x, y = y, color = genre)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  labs(
+    title = "t-SNE",
+    x = "t-SNE 1",
+    y = "t-SNE 2",
+    color = "Genre"
+  ) +
+  scale_color_d3(palette = "category20") +
+  theme_bw()
+```
+
+## UMAP
+
+We perform a UMAP analysis:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines'}
+umap_emb <- umap(
+  df_sample[, 4:(ncol(df_sample)-2)],
+  n_neighbors = 5,
+  metric = "euclidean",
+  min_dist = 0.1
+)
+```
+
+And we plot it in a scatter plot with different colours per genre:
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines', fig.cap="UMAP plot"}
+df_umap <- data.frame(
+  x = umap_emb[, 1],
+  y = umap_emb[, 2],
+  genre = df_sample$genre
+)
+
+ggplot(df_umap, aes(x = x, y = y, color = genre)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  labs(
+    title = "UMAP",
+    x = "UMAP 1",
+    y = "UMAP 2",
+    color = "Genre"
+  ) +
+  scale_color_d3(palette = "category20") +
+  theme_bw()
+```
+
+## Using ggplot's *facet_wrap*
+
+We can use **stat_density_2d** to generate scatter plots for every different genre. Using **facet_wrap**, we can generate one image with all 20 genres.
+
+```{r message=FALSE, warning=FALSE, attr.source='.numberLines', fig.cap="2D stat density plots for every genre after UMAP analysis"}
+ggplot(df_umap, aes(x = x, y = y, color = genre)) +
+  geom_point(alpha = 0.7, size = 1.5) +
+  labs(
+    title = "UMAP",
+    x = "UMAP 1",
+    y = "UMAP 2",
+    color = "Genre"
+  ) +
+  scale_color_d3(palette = "category20") +
+  theme_bw() +
+  stat_density_2d() +
+  facet_wrap(~ genre)
+```
+
+## Interactive plot
+
+We have also created an interactive plot that shows the album cover in a tooltip using **ggiraph**. This is not rendered in the PDF, but the code is:
+
+```{r message=FALSE, warning=FALSE, eval=FALSE, echo=FALSE, attr.source='.numberLines'}
+df_umap <- data.frame(
+  x = umap_emb[, 1],
+  y = umap_emb[, 2],
+  genre = df_sample$genre,
+  tooltip = df_sample$tooltip
+)
+
+umap_plot <- ggplot(df_umap, aes(x = x, y = y, color = genre, tooltip = tooltip)) +
+  labs(
+    title = "UMAP",
+    x = "UMAP 1",
+    y = "UMAP 2",
+    color = "Genre"
+  ) +
+  geom_point_interactive(size = 1) +
+  scale_color_d3(palette = "category20") +
+  theme_bw()
+
+
+girafe(ggobj = umap_plot)
+```
+
+# Results and discussion
+
+As it is seen in the biplot, feature dim_92 is most telling when it comes to describing the album covers. However, the features are generated by CLIP as said earlier. So this doesn't do much for our understanding of what defines an picture, or in this case an album cover.
+
+As you can see there are a couple groups that the t-SNE is really good at recognising. This includes Classical, death metal, heavy metal, and grime. This makes sense, because in reality these cover usually have very distinct styles. Pop and other mainstream genres do not, they differ a lot inside the genre itself and thus are spread across the plot and aren't groups.
+
+UMAP, that works with nearest neighbour instead of the t-distribution like t-SNE, has the same result as part of categorising. The distance is greater in the UMAP, but this doesn't anything about the data, it is just the wat UMAP works with repulsing and attracting. This can be changed by editing the parameters like steps and number of neighbours. 
+
+The t-SNE and UMAP plot are not useful for extracting data, the distance between groups doesn't say something about the similairities of groups. As said before the distances and plot can be changed by changing the parameters. The parameters of the t-SNE, like width of the distribution, can also be changed to get a bit of a diffrent result.
+
+In the **facet_wrap** plot, the main thing that we can see is that Deathmetal is really clusterd so it has to be a group in the total plot and thus easy reconisable, Hip-Hop for example looks spread out and thus in the total plot is probably spread out as well and not reconised easy by UMAP.
+
+# Conclusion
+
+The result given by t-SNE and UMAP do not differ much, not more than by random chance. Our reasoning is that the album covers do not lie on a lower dimensional manifold, and that the points are randomly clustered in the 512-dimensional hyperspace. So grouping based on a t-distribution or on nearest neighbour doesn't make a big difference.
+
+The CLIP model used to generate the image embeddings is an important tool to match images to text. However, it is too abstract for a human to understand. Reading the data in the csv file is not possible for humans. This was possible for the intensities in the practical of week 4.
